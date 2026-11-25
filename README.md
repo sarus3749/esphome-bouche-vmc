@@ -18,51 +18,9 @@ Firmware ESPHome pour une bouche de VMC à volet dosant l'ouverture, pilotée pa
 
 Le servo est alimenté en **5 V**, l'ESP01 en **3,3 V** (via un régulateur), avec une **masse commune**. Le signal 3,3 V de l'ESP suffit pour piloter le servo.
 
-```mermaid
-flowchart LR
-    ALIM["Alimentation 5 V<br/>(≥ 1 A)"]
-    C1["Condensateur<br/>470 à 1000 µF"]
-    REG["Régulateur 3,3 V<br/>(AMS1117-3.3 ou équivalent)<br/>+ 10 µF en sortie"]
-    ESP["ESP01 (1 Mo)"]
-    SERVO["Servo ES08MA II"]
+![Schéma de câblage ESP01 ↔ servo ES08MA II](docs/schema-cablage-esp01-servo.svg)
 
-    ALIM -- "+5 V" --> C1
-    ALIM -- "+5 V" --> REG
-    ALIM -- "+5 V → fil rouge" --> SERVO
-    REG -- "3,3 V → VCC et EN" --> ESP
-    ESP -- "GPIO2 → fil orange (signal)" --> SERVO
-    ALIM -. "GND commun<br/>(fil marron du servo)" .- ESP
-```
-
-Vue détaillée :
-
-```
- Alim 5 V (≥ 1 A)
-  +5 V ──┬──────────┬───────────────────────────────────► Servo, fil rouge (+5 V)
-         │          │
-        ═══        ┌┴────────────┐
-   470 à 1000 µF   │ Régulateur  │ 3,3 V ──┬─────────────► ESP01 VCC
-  (près du servo)  │   3,3 V     │         ├─────────────► ESP01 EN (CH_PD)
-         │         └┬────────────┘        ═══ 10 µF
-         │          │                      │
-  GND ───┴──────────┴──────────────────────┴──┬──────────► ESP01 GND
-                                              └──────────► Servo, fil marron (GND)
-
-  ESP01 GPIO2 ───────────────────────────────────────────► Servo, fil orange (signal)
-```
-
-Brochage de l'ESP01, vu côté composants, antenne en haut :
-
-```
-  ┌───────────────────────────┐
-  │  ≈≈≈≈≈≈≈ antenne ≈≈≈≈≈≈≈  │
-  │                           │
-  │   GND  GPIO2  GPIO0  RX   │
-  │    ●     ●      ●     ●   │
-  │    ●     ●      ●     ●   │
-  │   TX    EN     RST   VCC  │
-  └───────────────────────────┘
-```
+(version PNG : [`docs/schema-cablage-esp01-servo.png`](docs/schema-cablage-esp01-servo.png))
 
 | ESP01 | Relié à | Remarque |
 |---|---|---|
@@ -104,12 +62,12 @@ substitutions:
   log_baud_rate: "115200"      # mettre "0" si servo_pin est GPIO1 ou GPIO3
 
 packages:
-  commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@v1.0.0
+  commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@main
 ```
 
 Des exemples prêts à l'emploi sont dans [`exemples/`](exemples/).
 
-Le `@v1.0.0` fige la version du modèle : une bouche ne change de comportement que lorsque vous modifiez ce tag puis réinstallez. Pour suivre automatiquement la dernière version, mettre `@main` (ESPHome rafraîchit alors le modèle au plus une fois par jour).
+Avec `@main`, ESPHome rafraîchit le modèle au plus une fois par jour. Pour figer une version si besoin, remplacez `main` par un tag ou un commit.
 
 ### 3. Compiler et flasher
 
@@ -173,6 +131,7 @@ substitutions:
 | [`exemples/bouche-*.yaml`](exemples/) | Un fichier par bouche (WC, SdB, cuisine) |
 | [`exemples/bouche-ota-minimal.yaml`](exemples/bouche-ota-minimal.yaml) | Firmware tremplin pour débloquer une OTA |
 | [`exemples/secrets.yaml.exemple`](exemples/secrets.yaml.exemple) | Les clés à mettre dans votre `secrets.yaml` |
+| [`docs/`](docs/) | Schéma de câblage (SVG + PNG) |
 
 ## Licence
 

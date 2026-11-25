@@ -2,7 +2,7 @@
 #  Bouche VMC motorisée : ESP01 (ESP8266, 1 Mo) + servo S08MA II
 #  Paquet commun, inclus à distance par chaque fichier de bouche :
 #    packages:
-#      commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@v1.0.0
+#      commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@main
 #  https://github.com/sarus3749/esphome-bouche-vmc
 #
 #  Principe :
