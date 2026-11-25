@@ -7,4 +7,4 @@ substitutions:
   log_baud_rate: "115200"      # mettre "0" si servo_pin est GPIO1 ou GPIO3
 
 packages:
-  commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@v1.0.0
+  commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@main
