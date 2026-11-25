@@ -1,0 +1,341 @@
+# =====================================================================
+#  Bouche VMC motorisée : ESP01 (ESP8266, 1 Mo) + servo S08MA II
+#  Paquet commun, inclus à distance par chaque fichier de bouche :
+#    packages:
+#      commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@v1.0.0
+#  https://github.com/sarus3749/esphome-bouche-vmc
+#
+#  Principe :
+#   - le servo est piloté directement en PWM 50 Hz (largeur d'impulsion en µs) ;
+#   - le mouvement est une rampe logicielle à vitesse réglable ;
+#   - à l'arrivée, après un court délai, le PWM est coupé : le servo est
+#     « relâché » et ne force plus (pas de courant de maintien) ;
+#   - la largeur d'impulsion courante est sauvegardée en flash : au
+#     redémarrage on ne renvoie AUCUNE impulsion, donc pas d'à-coup.
+#
+#  Substitutions attendues (définies dans le fichier de la bouche) :
+#   name, friendly_name, servo_pin, log_baud_rate
+#
+#  Les butées se règlent en degrés (0 à 90°) dans Home Assistant ; la
+#  conversion en largeur d'impulsion se fait ici (voir substitutions).
+# =====================================================================
+
+substitutions:
+  # Correspondance angle → impulsion du servo (valeurs nominales d'un
+  # servo 90° comme l'ES08MA II : 0° = 1000 µs, 45° = 1500 µs (neutre),
+  # 90° = 2000 µs). NB : « Pulse traveling 1500 to 1900 µs » sur la fiche
+  # indique le SENS de rotation (anti-horaire quand l'impulsion passe de
+  # 1500 à 1900 µs), pas les limites de la course.
+  servo_us_0deg: "1000"
+  servo_us_90deg: "2000"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  # Affiché dans Home Assistant (infos de l'appareil).
+  project:
+    name: sarus3749.bouche-vmc
+    version: "1.0.0"
+  on_boot:
+    # Priorité basse : tout est initialisé, nombres restaurés compris.
+    priority: -100
+    then:
+      - lambda: |-
+          id(pret) = true;
+          id(publier_etat).execute();
+
+esp8266:
+  board: esp01_1m
+  # Indispensable pour retrouver position et réglages après une coupure.
+  restore_from_flash: true
+
+preferences:
+  # Les positions/réglages sont écrits en flash au plus toutes les 30 s
+  # (le volet ne bouge que quelques fois par heure : usure négligeable).
+  flash_write_interval: 30s
+
+logger:
+  level: INFO
+  # Si le servo est sur GPIO1 (TX) ou GPIO3 (RX), mettre baud_rate: 0.
+  baud_rate: ${log_baud_rate}
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    # Mises à jour OTA chiffrées avec la même clé que l'API (ESPHome ≥ 2026.11).
+    encryption: {}
+
+wifi:
+  ssid: !secret wifi-iot_ssid
+  password: !secret wifi-iot_password
+  # Pas de point d'accès de secours ni de portail captif : sur un ESP01
+  # (1 Mo), la place libre doit rester ≥ taille du firmware pour l'OTA.
+  # Sans Wi-Fi, l'ESP réessaie en boucle ; le volet reste où il est.
+
+# ---------------------------------------------------------------------
+#  Sortie PWM du servo (50 Hz → période 20 000 µs)
+# ---------------------------------------------------------------------
+output:
+  - platform: esp8266_pwm
+    id: servo_pwm
+    pin: ${servo_pin}
+    frequency: 50 Hz
+
+# ---------------------------------------------------------------------
+#  État interne
+# ---------------------------------------------------------------------
+globals:
+  # Largeur d'impulsion actuelle (µs). Sauvegardée : c'est elle qui
+  # permet de repartir sans à-coup après une coupure.
+  - id: impulsion_actuelle
+    type: float
+    restore_value: true
+    initial_value: "1500.0"   # neutre du servo (45°)
+  - id: impulsion_cible
+    type: float
+    restore_value: false
+    initial_value: "1000.0"
+  - id: en_mouvement
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: pret
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+# ---------------------------------------------------------------------
+#  Réglages exposés dans Home Assistant (catégorie « Configuration »)
+# ---------------------------------------------------------------------
+number:
+  - platform: template
+    id: butee_fermee
+    name: "Angle fermé"
+    icon: mdi:arrow-collapse-vertical
+    entity_category: config
+    unit_of_measurement: "°"
+    mode: box
+    min_value: 0
+    max_value: 90
+    step: 0.5
+    initial_value: 30   # prudent : à élargir pendant la calibration
+    optimistic: true
+    restore_value: true
+    # Pendant le réglage, le volet va directement à la nouvelle butée
+    # (à la vitesse réglée) pour voir l'effet tout de suite.
+    on_value:
+      - if:
+          condition:
+            lambda: return id(pret);
+          then:
+            - script.execute:
+                id: aller_a
+                position: 0.0
+
+  - platform: template
+    id: butee_ouverte
+    name: "Angle ouvert"
+    icon: mdi:arrow-expand-vertical
+    entity_category: config
+    unit_of_measurement: "°"
+    mode: box
+    min_value: 0
+    max_value: 90
+    step: 0.5
+    initial_value: 60   # prudent : à élargir pendant la calibration
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            lambda: return id(pret);
+          then:
+            - script.execute:
+                id: aller_a
+                position: 1.0
+
+  - platform: template
+    id: vitesse
+    name: "Vitesse"
+    icon: mdi:speedometer-slow
+    entity_category: config
+    unit_of_measurement: "%/s"
+    mode: slider
+    min_value: 1
+    max_value: 100
+    step: 1
+    initial_value: 25   # course complète en 4 s
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    id: delai_relachement
+    name: "Délai avant relâchement"
+    icon: mdi:timer-sand
+    entity_category: config
+    unit_of_measurement: "ms"
+    mode: box
+    min_value: 100
+    max_value: 5000
+    step: 50
+    initial_value: 500
+    optimistic: true
+    restore_value: true
+
+# ---------------------------------------------------------------------
+#  Entité principale : volet de type « damper » (registre d'air)
+# ---------------------------------------------------------------------
+cover:
+  - platform: template
+    id: bouche
+    name: None            # l'entité prend le nom de l'appareil
+    device_class: damper
+    has_position: true
+    optimistic: false
+    assumed_state: false
+    restore_mode: NO_RESTORE   # on gère nous-mêmes la restauration
+    open_action:
+      - script.execute:
+          id: aller_a
+          position: 1.0
+    close_action:
+      - script.execute:
+          id: aller_a
+          position: 0.0
+    position_action:
+      - script.execute:
+          id: aller_a
+          position: !lambda return pos;
+    stop_action:
+      - lambda: |-
+          id(impulsion_cible) = id(impulsion_actuelle);
+      # La boucle de mouvement voit cible == actuelle, termine et relâche.
+
+button:
+  - platform: template
+    name: "Recaler le servo"
+    icon: mdi:crosshairs-gps
+    entity_category: config
+    # Renvoie la position mémorisée pendant le délai de relâchement,
+    # utile si le volet a été bougé à la main.
+    on_press:
+      - script.stop: relacher
+      - lambda: |-
+          id(impulsion_cible) = id(impulsion_actuelle);
+          id(servo_pwm).set_level(id(impulsion_actuelle) / 20000.0f);
+          id(en_mouvement) = true;
+
+  - platform: restart
+    name: "Redémarrer"
+    entity_category: config
+
+sensor:
+  - platform: wifi_signal
+    name: "Signal Wi-Fi"
+    update_interval: 300s
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: template
+    id: servo_alimente
+    name: "Servo maintenu"
+    icon: mdi:engine
+    entity_category: diagnostic
+
+# ---------------------------------------------------------------------
+#  Logique de mouvement
+# ---------------------------------------------------------------------
+script:
+  # Fixe une nouvelle cible (0.0 = fermé, 1.0 = ouvert).
+  - id: aller_a
+    mode: restart
+    parameters:
+      position: float
+    then:
+      - script.stop: relacher
+      - lambda: |-
+          float p = position;
+          if (p < 0.0f) p = 0.0f;
+          if (p > 1.0f) p = 1.0f;
+          const float f = ${servo_us_0deg} + id(butee_fermee).state / 90.0f * (${servo_us_90deg} - ${servo_us_0deg});
+          const float o = ${servo_us_0deg} + id(butee_ouverte).state / 90.0f * (${servo_us_90deg} - ${servo_us_0deg});
+          id(impulsion_cible) = f + p * (o - f);
+          // Position mémorisée hors des butées (1er démarrage, butées
+          // modifiées) : on repart de la butée la plus proche.
+          const float lo = fminf(f, o), hi = fmaxf(f, o);
+          if (id(impulsion_actuelle) < lo) id(impulsion_actuelle) = lo;
+          if (id(impulsion_actuelle) > hi) id(impulsion_actuelle) = hi;
+          id(en_mouvement) = true;
+
+  # Coupe le PWM après le délai réglé : le servo ne force plus.
+  - id: relacher
+    mode: restart
+    then:
+      - delay: !lambda return (uint32_t) id(delai_relachement).state;
+      - lambda: |-
+          id(servo_pwm).turn_off();
+          id(servo_alimente).publish_state(false);
+          ESP_LOGI("bouche", "Servo relâché à %.0f µs", id(impulsion_actuelle));
+
+  # Publie position et sens de mouvement vers Home Assistant.
+  - id: publier_etat
+    mode: queued
+    then:
+      - lambda: |-
+          const float f = ${servo_us_0deg} + id(butee_fermee).state / 90.0f * (${servo_us_90deg} - ${servo_us_0deg});
+          const float o = ${servo_us_0deg} + id(butee_ouverte).state / 90.0f * (${servo_us_90deg} - ${servo_us_0deg});
+          float p = (fabsf(o - f) < 1.0f) ? 0.0f
+                    : (id(impulsion_actuelle) - f) / (o - f);
+          if (p < 0.0f) p = 0.0f;
+          if (p > 1.0f) p = 1.0f;
+          // Arrondi au pourcent pour éviter les états parasites.
+          p = roundf(p * 100.0f) / 100.0f;
+          id(bouche).position = p;
+          if (!id(en_mouvement)) {
+            id(bouche).current_operation = cover::COVER_OPERATION_IDLE;
+          } else {
+            const bool vers_ouvert = (o - f) * (id(impulsion_cible) - id(impulsion_actuelle)) > 0;
+            id(bouche).current_operation = vers_ouvert ? cover::COVER_OPERATION_OPENING
+                                                       : cover::COVER_OPERATION_CLOSING;
+          }
+          id(bouche).publish_state();
+
+interval:
+  # Boucle de rampe : ne fait rien hors mouvement.
+  - interval: 20ms
+    then:
+      - lambda: |-
+          static uint32_t dernier = 0;
+          static uint32_t dernier_publie = 0;
+          const uint32_t now = millis();
+          if (!id(en_mouvement)) { dernier = now; return; }
+
+          float dt = (now - dernier) / 1000.0f;
+          dernier = now;
+          if (dt <= 0.0f || dt > 0.2f) dt = 0.02f;   // 1er pas ou retard
+
+          // Course entre les deux butées, en µs (les butées sont en degrés).
+          float course = fabsf(id(butee_ouverte).state - id(butee_fermee).state) / 90.0f
+                         * fabsf((float) (${servo_us_90deg} - ${servo_us_0deg}));
+          if (course < 50.0f) course = 50.0f;
+          const float pas = id(vitesse).state / 100.0f * course * dt;
+
+          const float ecart = id(impulsion_cible) - id(impulsion_actuelle);
+          bool arrive = fabsf(ecart) <= pas;
+          id(impulsion_actuelle) = arrive ? id(impulsion_cible)
+                                          : id(impulsion_actuelle) + (ecart > 0 ? pas : -pas);
+
+          id(servo_pwm).set_level(id(impulsion_actuelle) / 20000.0f);
+          if (!id(servo_alimente).state) id(servo_alimente).publish_state(true);
+
+          if (arrive) {
+            id(en_mouvement) = false;
+            id(publier_etat).execute();
+            id(relacher).execute();
+          } else if (now - dernier_publie > 250) {
+            dernier_publie = now;
+            id(publier_etat).execute();
+          }

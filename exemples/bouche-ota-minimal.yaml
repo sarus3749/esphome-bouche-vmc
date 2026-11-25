@@ -1,0 +1,26 @@
+# Firmware « tremplin » minimal (~300 Ko) pour débloquer une OTA quand
+# l'ESP01 refuse le firmware complet faute de place.
+# Usage : copier ce fichier en remplaçant le contenu de bouche-xxx.yaml
+# (même name !), Install → Wirelessly, puis remettre le fichier normal
+# et refaire Install → Wirelessly.
+substitutions:
+  name: vmc-sdb              # même nom que la bouche à débloquer
+
+esphome:
+  name: ${name}
+
+esp8266:
+  board: esp01_1m
+
+# Ni logger, ni entités : juste de quoi recevoir la prochaine OTA.
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    encryption: {}
+
+wifi:
+  ssid: !secret wifi-iot_ssid
+  password: !secret wifi-iot_password

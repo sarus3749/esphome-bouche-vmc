@@ -1,0 +1,10 @@
+# Bouche VMC de la salle de bain : seules les substitutions changent d'une bouche à l'autre.
+# La logique vient du dépôt GitHub (version figée par le tag après @).
+substitutions:
+  name: vmc-sdb                # nom réseau (minuscules, tirets)
+  friendly_name: VMC SdB       # nom de l'appareil dans Home Assistant
+  servo_pin: GPIO2             # broche du signal servo
+  log_baud_rate: "115200"      # mettre "0" si servo_pin est GPIO1 ou GPIO3
+
+packages:
+  commun: github://sarus3749/esphome-bouche-vmc/bouche-vmc-commun.yaml@v1.0.0
